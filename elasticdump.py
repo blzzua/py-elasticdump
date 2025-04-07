@@ -3,11 +3,7 @@ import requests
 import os
 import sys
 import time
-try:
-    import orjson as json
-except ModuleNotFoundError:
-    import json
-
+import orjson as json
 import urllib3
 import hashlib
 from queue import Empty
