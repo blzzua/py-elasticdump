@@ -237,6 +237,7 @@ class DataExporter:
     def display(self, msg, end='\n'):
         print(msg, file=sys.stderr, end=end)
 
+    """TODO: move query-building logic to Query class. leave only read-data and check-es-response-is-not-error. dump-es-response-to-queue, dump-queue-to-output  """
     def read_with_scroll(self, slice_id=None, slice_max=None):
         if self.client.use_kibana:
             es_version = self.client.get_kibana_version()
@@ -270,6 +271,7 @@ class DataExporter:
 
 
         if self.debug_mode:
+            # todo: rewrite to logging module
             self.display(f'{self.client.host=}')
             self.display(f'{search_path=}')
 
@@ -290,6 +292,7 @@ class DataExporter:
         rt = self.client.session.get(**query_kwargs) if es_version > 2.1 else self.client.session.post(**query_kwargs)
 
         if self.debug_mode:
+            # todo: rewrite to logging module
             self.display('query_body:')
             self.display(query_body)
             self.display('url:'+rt.request.url)
@@ -496,13 +499,13 @@ class DataExporter:
             return f.readline().strip()
 
     def dump_queue(self):
+        """TODO: refactor for DRY/KISS cycles: while True: try """
         if self.output_filename:
             if self.output_splitsize and self.output_splitsize > 0:
                 file_counter = 0
                 line_counter = 0
                 current_file = None
                 filename_base, filename_ext = os.path.splitext(self.output_filename)
-
                 while True:
                     try:
                         dump_data = json.dumps(self.output_queue.get(block=False)).decode("utf-8") + "\n"
@@ -512,11 +515,12 @@ class DataExporter:
                             filename = f"{filename_base}-{file_counter:02d}{filename_ext}"
                             if not self.output_rewrite and os.path.exists(filename):
                                 raise FileExistsError(
-                                    f"Can not create {filename}. File is already exists \n Use --output-rewrite parameter for rewrite.")
+                                    f"Can not create {filename}. File is already exists \nUse --output-rewrite parameter for rewrite.")
                             current_file = open(filename, "w")
                             line_counter = 0
                             file_counter += 1
-                        current_file.write(dump_data)
+                        current_file.write(dump_data) #  buffering=1 is not necessary bc we cannot have unbuffered text I/O
+
                         line_counter += 1
                     except Empty:
                         if (
