@@ -641,9 +641,12 @@ if __name__ == "__main__":
         help="Recover dump using search_after with sort by _doc",
         type=int,
     )
-    parser.add_argument("--output", help="Output filename to export. Default stdout")
-    parser.add_argument("--output-rewrite", help="Rewrite output file if it exists", action="store_true")
-    parser.add_argument("--output-splitsize", help="Split output into multiple files by line count", type=int)
+
+    output_group = parser.add_argument_group("Output options")
+    output_group.add_argument("--output", help="Output filename to export. Default stdout")
+    output_group.add_argument("--output-rewrite", help="Rewrite output file if exists", action="store_true")
+    output_group.add_argument("--output-splitsize", help="Split output into multiple files by line count", type=int)
+
 
     parser.add_argument(
         "--debug", help="Print debug messages to STDERR", action="store_true"
@@ -653,9 +656,16 @@ if __name__ == "__main__":
 
     outq = Queue(maxsize=10000)
     alldone_flags = []
+
     output_filename = args.output
     output_rewrite = args.output_rewrite
     output_splitsize = args.output_splitsize
+    if not (args.output):
+        if output_rewrite:
+            display("Must provide --output filename for use --output-rewrite")
+        if output_splitsize:
+            display("Must provide --output filename for use --output_splitsize")
+        exit(1)
 
     if args.url is None and (args.host or args.index) is None:
         display("must provide url or host and index name!")
