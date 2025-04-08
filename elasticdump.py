@@ -213,7 +213,8 @@ class Query:
             return f"/{self.index}/_search"
 
 class DataExporter:
-    def __init__(self, client, query, output_queue, total_exported, alldone_event, debug_mode=False):
+    def __init__(self, client, query, output_queue, total_exported, alldone_event, debug_mode=False,
+                 output_filename=None, output_rewrite=False, output_splitsize=None):
         self.client = client
         self.query = query
         self.output_queue = output_queue
@@ -221,6 +222,9 @@ class DataExporter:
         self.alldone_event = alldone_event
         self.debug_mode = debug_mode
         self.session_file_name = self._generate_session_file_name()
+        self.output_filename = output_filename
+        self.output_rewrite = output_rewrite
+        self.output_splitsize = output_splitsize
 
     def _generate_session_file_name(self):
         session_file_name = f"{urlparse(self.client.host).netloc}_{self.query.index}"
@@ -250,7 +254,7 @@ class DataExporter:
             self._start_new_scroll_session(scroll_func, es_version, slice_id, slice_max)
 
         self.alldone_event.set()
-        self.display("All done!")
+        self.display("\nAll done!")
 
     def _start_new_scroll_session(self, scroll_func, es_version, slice_id=None, slice_max=None):
         headers = {"Content-Type": "application/json"}
@@ -492,17 +496,67 @@ class DataExporter:
             return f.readline().strip()
 
     def dump_queue(self):
-        while True:
-            try:
-                dump_data = json.dumps(self.output_queue.get(block=False)).decode("utf-8")
-                print(dump_data)
-            except Empty:
-                if (
-                    all([ad.is_set() for ad in alldone_flags])
-                    and self.output_queue.qsize() == 0
-                ):
-                    break
-                time.sleep(0.1)
+        if self.output_filename:
+            if self.output_splitsize and self.output_splitsize > 0:
+                file_counter = 0
+                line_counter = 0
+                current_file = None
+                filename_base, filename_ext = os.path.splitext(self.output_filename)
+
+                while True:
+                    try:
+                        dump_data = json.dumps(self.output_queue.get(block=False)).decode("utf-8") + "\n"
+                        if current_file is None or line_counter >= self.output_splitsize:
+                            if current_file:
+                                current_file.close()
+                            filename = f"{filename_base}-{file_counter:02d}{filename_ext}"
+                            if not self.output_rewrite and os.path.exists(filename):
+                                raise FileExistsError(
+                                    f"Can not create {filename}. File is already exists \n Use --output-rewrite parameter for rewrite.")
+                            current_file = open(filename, "w")
+                            line_counter = 0
+                            file_counter += 1
+                        current_file.write(dump_data)
+                        line_counter += 1
+                    except Empty:
+                        if (
+                            all([ad.is_set() for ad in alldone_flags])
+                            and self.output_queue.qsize() == 0
+                        ):
+                            if current_file:
+                                current_file.close()
+                            break
+                        time.sleep(0.1)
+            else:
+                filename = self.output_filename
+                if not self.output_rewrite and os.path.exists(filename):
+                    raise FileExistsError(
+                        f"Cannot create {filename}. File is already exists \nUse --output-rewrite parameter for rewrite.")
+                with open(filename, "w") as outfile:
+                    while True:
+                        try:
+                            dump_data = json.dumps(self.output_queue.get(block=False)).decode("utf-8") + "\n"
+                            outfile.write(dump_data)
+                        except Empty:
+                            if (
+                                all([ad.is_set() for ad in alldone_flags])
+                                and self.output_queue.qsize() == 0
+                            ):
+                                break
+                            time.sleep(0.1)
+        else:
+            while True:
+                try:
+                    dump_data = json.dumps(self.output_queue.get(block=False)).decode("utf-8")
+                    print(dump_data)
+                except Empty:
+                    if (
+                        all([ad.is_set() for ad in alldone_flags])
+                        and self.output_queue.qsize() == 0
+                    ):
+                        break
+                    time.sleep(0.1)
+
 
 def display(msg, end='\n'):
     print(msg, file=sys.stderr, end=end)
@@ -587,6 +641,10 @@ if __name__ == "__main__":
         help="Recover dump using search_after with sort by _doc",
         type=int,
     )
+    parser.add_argument("--output", help="Output filename to export. Default stdout")
+    parser.add_argument("--output-rewrite", help="Rewrite output file if it exists", action="store_true")
+    parser.add_argument("--output-splitsize", help="Split output into multiple files by line count", type=int)
+
     parser.add_argument(
         "--debug", help="Print debug messages to STDERR", action="store_true"
     )
@@ -595,6 +653,9 @@ if __name__ == "__main__":
 
     outq = Queue(maxsize=10000)
     alldone_flags = []
+    output_filename = args.output
+    output_rewrite = args.output_rewrite
+    output_splitsize = args.output_splitsize
 
     if args.url is None and (args.host or args.index) is None:
         display("must provide url or host and index name!")
@@ -644,7 +705,8 @@ if __name__ == "__main__":
     client = ElasticsearchClient(host, username, password, use_compression, use_kibana, use_kibana_esapi, follow_redirect)
     query = Query(index, size, query_string, dsl_query, fields, excludes, sort, scroll_jump_id, slices, search_after)
     alldone = Event()
-    exporter = DataExporter(client, query, outq, total, alldone, debug)
+    exporter = DataExporter(client, query, outq, total, alldone, debug, output_filename, output_rewrite, output_splitsize)
+
     alldone_flags.append(alldone)
 
     if args.slices:
