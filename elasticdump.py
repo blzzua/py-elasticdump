@@ -661,15 +661,17 @@ if __name__ == "__main__":
     outq = Queue(maxsize=10000)
     alldone_flags = []
 
+
     output_filename = args.output
     output_rewrite = args.output_rewrite
     output_splitsize = args.output_splitsize
     if not (args.output):
         if output_rewrite:
             display("Must provide --output filename for use --output-rewrite")
+            exit(1)
         if output_splitsize:
             display("Must provide --output filename for use --output_splitsize")
-        exit(1)
+            exit(1)
 
     if args.url is None and (args.host or args.index) is None:
         display("must provide url or host and index name!")
